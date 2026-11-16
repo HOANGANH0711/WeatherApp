@@ -1,9 +1,5 @@
 package com.example.weatherapp
 
-import android.R.attr.contentDescription
-import android.R.attr.text
-import android.health.connect.datatypes.units.Temperature
-import android.widget.Space
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,7 +15,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,16 +23,14 @@ import com.example.weatherapp.ui.theme.WeatherAppTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.painterResource
-import io.ktor.utils.io.CancellationException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import coil3.compose.AsyncImage
-import com.example.weatherapp.BuildConfig
 import com.example.weatherapp.model.WeatherResponse
 import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
 import com.example.weatherapp.model.ForecastResponse
 
 private val cardColor = Color.White.copy(alpha = 0.14f)
+private const val REFRESH_INTERVAL_MILLIS = 15 * 60 * 1000L
  @Composable
  fun WeatherDashboard(){
      val gradient = Brush.verticalGradient(
@@ -55,6 +48,8 @@ private val cardColor = Color.White.copy(alpha = 0.14f)
      var temperature by remember{
          mutableStateOf<Double?>(null)
      }
+     var minTemperature by remember { mutableStateOf<Double?>(null) }
+     var maxTemperature by remember { mutableStateOf<Double?>(null) }
      var description by remember{
          mutableStateOf("")
      }
@@ -90,6 +85,7 @@ private val cardColor = Color.White.copy(alpha = 0.14f)
      var forecastData by remember{
          mutableStateOf<ForecastResponse?>(null)
      }
+     var forecastError by remember { mutableStateOf<String?>(null) }
      LaunchedEffect(Unit) {
          while(true){
              isLoading = temperature ==null
@@ -103,6 +99,8 @@ private val cardColor = Color.White.copy(alpha = 0.14f)
 
                  cityName = response.name
                  temperature = response.main.temp
+                 minTemperature = response.main.temp_min
+                 maxTemperature = response.main.temp_max
                  description = response.weather.firstOrNull()?.description
                      ?: "Không xác định"
                  humidity = response.main.humidity
@@ -117,7 +115,7 @@ private val cardColor = Color.White.copy(alpha = 0.14f)
                  isLoading = false
              }
 
-             delay(15*6*1000L)
+             delay(REFRESH_INTERVAL_MILLIS)
          }
      }
      LaunchedEffect(Unit) {
@@ -148,29 +146,33 @@ private val cardColor = Color.White.copy(alpha = 0.14f)
              }
              otherCitiesWeather = otherCitiesWeather + results
 
-             delay(15*60*1000L)
+             delay(REFRESH_INTERVAL_MILLIS)
          }
      }
      LaunchedEffect(Unit) {
-         try{
-             forecastData = weatherApi.getForecast(
-                 city = "Ho Chi Minh City",
-                 apiKey = BuildConfig.OPENWEATHER_API_KEY
-             )
-             android.util.Log.d(
-                 "ForecastDebug",
-                 "Số mốc dự báo: ${forecastData?.list?.size}"
-             )
-         }catch(e: CancellationException){
-             throw e
-         }catch(e: Exception){
-             android.util.Log.e(
-                 "ForecastDebug",
-                 "Không thể tải dữ liệu dự báo",
-                 e
-             )
+         while (true) {
+             forecastError = null
+             try {
+                 forecastData = weatherApi.getForecast(
+                     city = "Ho Chi Minh City",
+                     apiKey = BuildConfig.OPENWEATHER_API_KEY
+                 )
+                 android.util.Log.d(
+                     "ForecastDebug",
+                     "Số mốc dự báo: ${forecastData?.list?.size}"
+                 )
+             } catch (e: CancellationException) {
+                 throw e
+             } catch (e: Exception) {
+                 forecastError = "Không thể cập nhật dự báo. Sẽ thử lại sau 15 phút."
+                 android.util.Log.e(
+                     "ForecastDebug",
+                     "Không thể tải dữ liệu dự báo",
+                     e
+                 )
+             }
+             delay(REFRESH_INTERVAL_MILLIS)
          }
-
      }
      Box(
          modifier = Modifier
@@ -191,8 +193,16 @@ private val cardColor = Color.White.copy(alpha = 0.14f)
                      }else{
                          description
                      },
-                     icon = weatherIcon
+                     icon = weatherIcon,
+                     minTemperature = minTemperature,
+                     maxTemperature = maxTemperature
                  )
+                 errorMessage?.let {
+                     Text(
+                         text = "Không thể cập nhật thời tiết. Sẽ thử lại sau 15 phút.",
+                         color = Color.White
+                     )
+                 }
              }
              item{
                  Text(
@@ -203,10 +213,14 @@ private val cardColor = Color.White.copy(alpha = 0.14f)
                  Spacer(Modifier.height(12.dp))
                  val forecasts = forecastData?.list.orEmpty()
                  val timezoneOffset = forecastData?.city?.timezone ?: 0
+                 forecastError?.let { message ->
+                     Text(text = message, color = Color.White)
+                 }
 
                  if(forecasts.isEmpty()){
                      Text(
-                         text = "Đang tải dữ báo",
+                         text = if (forecastError != null) "Chưa có dữ liệu dự báo"
+                             else "Đang tải dự báo",
                          color = Color.White
                      )
                  }else{
@@ -316,7 +330,9 @@ fun CurrentWeatherCard(
     city: String,
     temperature: Double?,
     description: String,
-    icon: String
+    icon: String,
+    minTemperature: Double?,
+    maxTemperature: Double?
 ){
     Column(
         modifier  = Modifier
@@ -355,7 +371,8 @@ fun CurrentWeatherCard(
         Spacer(Modifier.height(8.dp))
 
         Text(
-            "Cao nhất: 33°  •  Thấp nhất: 26°",
+            "Cao nhất hiện tại: ${maxTemperature?.let { "${it.toInt()}°C" } ?: "--"}" +
+                "  •  Thấp nhất: ${minTemperature?.let { "${it.toInt()}°C" } ?: "--"}",
             color = Color.White.copy(alpha = 0.8f)
         )
 

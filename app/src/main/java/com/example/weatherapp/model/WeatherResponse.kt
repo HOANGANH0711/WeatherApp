@@ -21,5 +21,7 @@ data class WindInfo(val speed: Double)
 data class MainWeather(
     val temp: Double,
     val feels_like: Double,
-    val humidity: Int
+    val humidity: Int,
+    val temp_min: Double? = null,
+    val temp_max: Double? = null
 )
